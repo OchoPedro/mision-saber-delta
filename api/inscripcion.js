@@ -1,7 +1,7 @@
 // api/inscripcion.js — Vercel Serverless Function
 // Guarda inscripción en SharePoint/Excel y envía correo de confirmación
 
-const TENANT_ID     = process.env.TENANT_ID;
+const TENANT_ID     = process.env.TENANT_ID; 
 const CLIENT_ID     = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const SHAREPOINT_HOST = 'miltonochoacol.sharepoint.com';
