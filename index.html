@@ -258,7 +258,7 @@
      guarda las inscripciones solo en este dispositivo.
   ===================================================================== */
   const CONFIG = {
-    sheetEndpoint: "https://script.google.com/macros/s/AKfycbywJPlprobtaD0KZWZIS5i6RodcesbpRScT0fAe7TeLOzeTF-r-mWLJpWoBy-uxDldtYA/exec"
+    sheetEndpoint: "/api/inscripcion"
   };
 
   /* ---------- LOGO (inyectado en cada .logo-box) ---------- */
@@ -317,7 +317,9 @@
   function saveLocal(d){try{const k='delta_inscripciones';const arr=JSON.parse(localStorage.getItem(k)||'[]');arr.push(d);localStorage.setItem(k,JSON.stringify(arr));}catch(e){}}
   async function sendToSheet(d){
     if(!CONFIG.sheetEndpoint) return;        // modo demo
-    try{await fetch(CONFIG.sheetEndpoint,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(d)});}
+    try{const r=await fetch(CONFIG.sheetEndpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+    const result=await r.json();
+    if(!result.ok) throw new Error(result.error||'Error desconocido');}
     catch(e){console.warn('No se pudo enviar al Sheet:',e);}
   }
 
