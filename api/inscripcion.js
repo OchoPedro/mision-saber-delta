@@ -93,13 +93,13 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
   } else {
     // Sin tabla — escribir directamente en celdas
     // Obtener rango usado
-    const uRes  = await fetch(`${base}/worksheets('Sheet1')/usedRange`, { headers: { Authorization: `Bearer ${token}` } });
+    const uRes  = await fetch(`${base}/worksheets('Hoja1')/usedRange`, { headers: { Authorization: `Bearer ${token}` } });
     const uData = await uRes.json();
     let nextRow  = uData.rowCount ? uData.rowCount + 1 : 1;
 
     if (nextRow === 1) {
       // Crear encabezados
-      await fetch(`${base}/worksheets('Sheet1')/range(address='A1:F1')`, {
+      await fetch(`${base}/worksheets('Hoja1')/range(address='A1:F1')`, {
         method:  'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body:    JSON.stringify({ values: [['Fecha', 'Nombre', 'Ciudad', 'Institución', 'WhatsApp', 'Correo']] }),
@@ -107,7 +107,7 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
       nextRow = 2;
     }
 
-    const writeRes = await fetch(`${base}/worksheets('Sheet1')/range(address='A${nextRow}:F${nextRow}')`, {
+    const writeRes = await fetch(`${base}/worksheets('Hoja1')/range(address='A${nextRow}:F${nextRow}')`, {
       method:  'PATCH',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body:    JSON.stringify({ values: [row] }),
