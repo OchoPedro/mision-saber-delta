@@ -6,7 +6,7 @@ const CLIENT_ID     = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const SHAREPOINT_HOST = 'miltonochoacol.sharepoint.com';
 const SITE_PATH       = '/sites/Programacin';
-const FROM_EMAIL      = 'Programacion@aamocolombia.com';
+const FROM_EMAIL = 'Pedro.Ochoa@aamocolombia.com';
 
 // ── Obtener token ─────────────────────────────────────────────────────────────
 async function getToken() {
