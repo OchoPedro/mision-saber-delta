@@ -1,7 +1,5 @@
 // api/inscripcion.js — Vercel Serverless Function
-// Guarda inscripción en SharePoint/Excel y envía correo vía SMTP
-
-import nodemailer from 'nodemailer';
+// Guarda inscripción en SharePoint/Excel y envía correo via Graph API con credenciales de usuario
 
 const TENANT_ID       = process.env.TENANT_ID;
 const CLIENT_ID       = process.env.CLIENT_ID;
@@ -11,8 +9,8 @@ const SITE_PATH       = '/sites/Programacin';
 const EMAIL_USER      = process.env.EMAIL_USER;
 const EMAIL_PASS      = process.env.EMAIL_PASS;
 
-// ── Token ─────────────────────────────────────────────────────────────────────
-async function getToken() {
+// ── Token Graph API (client credentials para SharePoint) ──────────────────────
+async function getAppToken() {
   const res  = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
     method: 'POST',
     body: new URLSearchParams({
@@ -22,6 +20,24 @@ async function getToken() {
   });
   const data = await res.json();
   if (!data.access_token) throw new Error('Token error: ' + JSON.stringify(data));
+  return data.access_token;
+}
+
+// ── Token de usuario (ROPC) para enviar correo ────────────────────────────────
+async function getUserToken() {
+  const res = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      client_id:  CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      scope:      'https://graph.microsoft.com/Mail.Send offline_access',
+      grant_type: 'password',
+      username:   EMAIL_USER,
+      password:   EMAIL_PASS,
+    }),
+  });
+  const data = await res.json();
+  if (!data.access_token) throw new Error('Token usuario error: ' + JSON.stringify(data));
   return data.access_token;
 }
 
@@ -68,18 +84,14 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
   const HEADERS = ['Fecha', 'Nombre', 'Ciudad', 'Institución', 'WhatsApp', 'Correo'];
   const row     = [inscrito.fecha, inscrito.nombre, inscrito.ciudad, inscrito.institucion, inscrito.whatsapp, inscrito.correo];
 
-  // Obtener rango usado
   const uRes  = await fetch(`${base}/worksheets('Hoja1')/usedRange`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const uData = await uRes.json();
 
   let nextRow = 1;
-  if (uData.rowCount && uData.rowCount > 0) {
-    nextRow = uData.rowCount + 1;
-  }
+  if (uData.rowCount && uData.rowCount > 0) nextRow = uData.rowCount + 1;
 
-  // Si primera fila, agregar encabezados
   if (nextRow === 1) {
     await fetch(`${base}/worksheets('Hoja1')/range(address='A1:F1')`, {
       method: 'PATCH',
@@ -89,7 +101,6 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
     nextRow = 2;
   }
 
-  // Escribir datos
   const writeRes = await fetch(`${base}/worksheets('Hoja1')/range(address='A${nextRow}:F${nextRow}')`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -100,16 +111,8 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
   console.log('Fila escrita en:', nextRow);
 }
 
-// ── Enviar correo vía SMTP ────────────────────────────────────────────────────
-async function sendEmail(inscrito) {
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.office365.com',
-    port: 587,
-    secure: false,
-    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-    tls: { ciphers: 'SSLv3' },
-  });
-
+// ── Enviar correo con token de usuario ────────────────────────────────────────
+async function sendEmail(userToken, inscrito) {
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#081623;color:#c3ccd4;padding:40px;border-radius:12px;">
       <div style="text-align:center;margin-bottom:30px;">
@@ -140,12 +143,23 @@ async function sendEmail(inscrito) {
       </div>
     </div>`;
 
-  await transporter.sendMail({
-    from: `"Misión Saber Delta" <${EMAIL_USER}>`,
-    to: inscrito.correo,
-    subject: '🔺 MISIÓN SABER DELTA — Inscripción Confirmada',
-    html,
+  const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: {
+        subject: '🔺 MISIÓN SABER DELTA — Inscripción Confirmada',
+        body: { contentType: 'HTML', content: html },
+        toRecipients: [{ emailAddress: { address: inscrito.correo, name: inscrito.nombre } }],
+      },
+      saveToSentItems: true,
+    }),
   });
+
+  if (!sendRes.ok && sendRes.status !== 202) {
+    const err = await sendRes.text();
+    throw new Error('Error correo: ' + err);
+  }
   console.log('Correo enviado a:', inscrito.correo);
 }
 
@@ -164,13 +178,16 @@ export default async function handler(req, res) {
 
     const inscrito = { nombre, ciudad, institucion, whatsapp, correo, fecha: fecha || new Date().toISOString() };
 
-    const token   = await getToken();
-    const siteId  = await getSiteId(token);
-    const driveId = await getDriveId(token, siteId);
-    const fileId  = await findFileId(token, siteId, driveId);
+    // Token de app para SharePoint
+    const appToken  = await getAppToken();
+    const siteId    = await getSiteId(appToken);
+    const driveId   = await getDriveId(appToken, siteId);
+    const fileId    = await findFileId(appToken, siteId, driveId);
+    await appendRow(appToken, siteId, driveId, fileId, inscrito);
 
-    await appendRow(token, siteId, driveId, fileId, inscrito);
-    await sendEmail(inscrito);
+    // Token de usuario para correo
+    const userToken = await getUserToken();
+    await sendEmail(userToken, inscrito);
 
     return res.status(200).json({ ok: true, message: 'Inscripción guardada y correo enviado' });
 
