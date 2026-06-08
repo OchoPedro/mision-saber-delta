@@ -1,5 +1,4 @@
 // api/inscripcion.js — Vercel Serverless Function
-// Guarda inscripción en SharePoint/Excel y envía correo via Graph API con credenciales de usuario
 
 const TENANT_ID       = process.env.TENANT_ID;
 const CLIENT_ID       = process.env.CLIENT_ID;
@@ -9,7 +8,6 @@ const SITE_PATH       = '/sites/Programacin';
 const EMAIL_USER      = process.env.EMAIL_USER;
 const EMAIL_PASS      = process.env.EMAIL_PASS;
 
-// ── Token Graph API (client credentials para SharePoint) ──────────────────────
 async function getAppToken() {
   const res  = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
     method: 'POST',
@@ -23,35 +21,15 @@ async function getAppToken() {
   return data.access_token;
 }
 
-// ── Token de usuario (ROPC) para enviar correo ────────────────────────────────
-async function getUserToken() {
-  const res = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
-    method: 'POST',
-    body: new URLSearchParams({
-      client_id:  CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      scope:      'https://graph.microsoft.com/Mail.Send offline_access',
-      grant_type: 'password',
-      username:   EMAIL_USER,
-      password:   EMAIL_PASS,
-    }),
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error('Token usuario error: ' + JSON.stringify(data));
-  return data.access_token;
-}
-
-// ── Site ID ───────────────────────────────────────────────────────────────────
 async function getSiteId(token) {
   const res  = await fetch(`https://graph.microsoft.com/v1.0/sites/${SHAREPOINT_HOST}:${SITE_PATH}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
-  if (!data.id) throw new Error('Sitio no encontrado: ' + JSON.stringify(data));
+  if (!data.id) throw new Error('Sitio no encontrado');
   return data.id;
 }
 
-// ── Drive ID ──────────────────────────────────────────────────────────────────
 async function getDriveId(token, siteId) {
   const res  = await fetch(`https://graph.microsoft.com/v1.0/sites/${siteId}/drive`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -61,7 +39,6 @@ async function getDriveId(token, siteId) {
   return data.id;
 }
 
-// ── Buscar archivo ────────────────────────────────────────────────────────────
 async function findFileId(token, siteId, driveId) {
   const paths = [
     'Saber Delta/Inscripciones_Delta.xlsx',
@@ -78,20 +55,29 @@ async function findFileId(token, siteId, driveId) {
   throw new Error('Archivo Excel no encontrado');
 }
 
-// ── Escribir fila en Excel ────────────────────────────────────────────────────
 async function appendRow(token, siteId, driveId, fileId, inscrito) {
   const base    = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${fileId}/workbook`;
   const HEADERS = ['Fecha', 'Nombre', 'Ciudad', 'Institución', 'WhatsApp', 'Correo'];
   const row     = [inscrito.fecha, inscrito.nombre, inscrito.ciudad, inscrito.institucion, inscrito.whatsapp, inscrito.correo];
 
-  const uRes  = await fetch(`${base}/worksheets('Hoja1')/usedRange`, {
+  // Leer columna A para encontrar primera fila vacía
+  const colRes  = await fetch(`${base}/worksheets('Hoja1')/range(address='A1:A500')`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const uData = await uRes.json();
+  const colData = await colRes.json();
 
   let nextRow = 1;
-  if (uData.rowCount && uData.rowCount > 0) nextRow = uData.rowCount + 1;
+  if (colData.values) {
+    for (let i = 0; i < colData.values.length; i++) {
+      if (!colData.values[i][0] || colData.values[i][0] === '') {
+        nextRow = i + 1;
+        break;
+      }
+      nextRow = i + 2;
+    }
+  }
 
+  // Si primera fila está vacía, crear encabezados
   if (nextRow === 1) {
     await fetch(`${base}/worksheets('Hoja1')/range(address='A1:F1')`, {
       method: 'PATCH',
@@ -101,6 +87,7 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
     nextRow = 2;
   }
 
+  // Escribir datos en siguiente fila vacía
   const writeRes = await fetch(`${base}/worksheets('Hoja1')/range(address='A${nextRow}:F${nextRow}')`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -111,59 +98,6 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
   console.log('Fila escrita en:', nextRow);
 }
 
-// ── Enviar correo con token de usuario ────────────────────────────────────────
-async function sendEmail(userToken, inscrito) {
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#081623;color:#c3ccd4;padding:40px;border-radius:12px;">
-      <div style="text-align:center;margin-bottom:30px;">
-        <h1 style="color:#ffffff;font-size:28px;letter-spacing:4px;">🔺 MISIÓN SABER DELTA</h1>
-        <p style="color:#8794a1;letter-spacing:2px;font-size:13px;">MILTON OCHOA</p>
-      </div>
-      <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(150,180,205,0.22);border-radius:10px;padding:25px;margin-bottom:25px;">
-        <h2 style="color:#e0b24c;font-size:22px;margin-bottom:10px;">✅ INSCRIPCIÓN CONFIRMADA</h2>
-        <p style="font-size:16px;line-height:1.6;">Agente <strong style="color:#ffffff;">${inscrito.nombre}</strong>, tu inscripción al grupo Delta ha sido registrada exitosamente.</p>
-      </div>
-      <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(150,180,205,0.15);border-radius:10px;padding:20px;margin-bottom:25px;">
-        <h3 style="color:#4db3ff;margin-bottom:15px;font-size:14px;letter-spacing:2px;">TUS DATOS DE INSCRIPCIÓN</h3>
-        <table style="width:100%;font-size:15px;">
-          <tr><td style="color:#8794a1;padding:6px 0;width:120px;">Nombre</td><td style="color:#ffffff;">${inscrito.nombre}</td></tr>
-          <tr><td style="color:#8794a1;padding:6px 0;">Ciudad</td><td style="color:#ffffff;">${inscrito.ciudad}</td></tr>
-          <tr><td style="color:#8794a1;padding:6px 0;">Institución</td><td style="color:#ffffff;">${inscrito.institucion}</td></tr>
-          <tr><td style="color:#8794a1;padding:6px 0;">WhatsApp</td><td style="color:#ffffff;">${inscrito.whatsapp}</td></tr>
-          <tr><td style="color:#8794a1;padding:6px 0;">Correo</td><td style="color:#ffffff;">${inscrito.correo}</td></tr>
-        </table>
-      </div>
-      <p style="text-align:center;color:#8794a1;font-size:14px;line-height:1.6;">
-        Pronto recibirás más información sobre la misión.<br/>
-        Bienvenido a la élite. El profe <strong style="color:#ffffff;">Milton Ochoa</strong> te espera. 🔺
-      </p>
-      <div style="text-align:center;margin-top:30px;padding-top:20px;border-top:1px solid rgba(150,180,205,0.15);">
-        <p style="color:#4db3ff;font-size:12px;letter-spacing:3px;">ASESORÍAS ACADÉMICAS MILTON OCHOA</p>
-        <p style="color:#8794a1;font-size:11px;">aamocolombia.com</p>
-      </div>
-    </div>`;
-
-  const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: {
-        subject: '🔺 MISIÓN SABER DELTA — Inscripción Confirmada',
-        body: { contentType: 'HTML', content: html },
-        toRecipients: [{ emailAddress: { address: inscrito.correo, name: inscrito.nombre } }],
-      },
-      saveToSentItems: true,
-    }),
-  });
-
-  if (!sendRes.ok && sendRes.status !== 202) {
-    const err = await sendRes.text();
-    throw new Error('Error correo: ' + err);
-  }
-  console.log('Correo enviado a:', inscrito.correo);
-}
-
-// ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -178,18 +112,17 @@ export default async function handler(req, res) {
 
     const inscrito = { nombre, ciudad, institucion, whatsapp, correo, fecha: fecha || new Date().toISOString() };
 
-    // Token de app para SharePoint
-    const appToken  = await getAppToken();
-    const siteId    = await getSiteId(appToken);
-    const driveId   = await getDriveId(appToken, siteId);
-    const fileId    = await findFileId(appToken, siteId, driveId);
+    const appToken = await getAppToken();
+    const siteId   = await getSiteId(appToken);
+    const driveId  = await getDriveId(appToken, siteId);
+    const fileId   = await findFileId(appToken, siteId, driveId);
+
     await appendRow(appToken, siteId, driveId, fileId, inscrito);
 
-    // Token de usuario para correo
-    const userToken = await getUserToken();
-    await sendEmail(userToken, inscrito);
+    // Correo pendiente de configurar
+    console.log('Inscripción guardada:', inscrito.nombre);
 
-    return res.status(200).json({ ok: true, message: 'Inscripción guardada y correo enviado' });
+    return res.status(200).json({ ok: true, message: 'Inscripción guardada exitosamente' });
 
   } catch (err) {
     console.error('Error:', err.message);
