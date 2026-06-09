@@ -6,7 +6,7 @@ const CLIENT_SECRET   = process.env.CLIENT_SECRET;
 const SHAREPOINT_HOST = 'miltonochoacol.sharepoint.com';
 const SITE_PATH       = '/sites/Programacin';
 const RESEND_API_KEY  = process.env.RESEND_API_KEY;
-const FROM_EMAIL      = 'Saber.Delta@aamocolombia.com';
+const FROM_EMAIL      = 'Saber.Delta@aamocolombia.com'; 
 
 async function getToken() {
   const res  = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
