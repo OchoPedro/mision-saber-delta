@@ -5,8 +5,8 @@ const CLIENT_ID       = process.env.CLIENT_ID;
 const CLIENT_SECRET   = process.env.CLIENT_SECRET;
 const SHAREPOINT_HOST = 'miltonochoacol.sharepoint.com';
 const SITE_PATH       = '/sites/Programacin';
+const RESEND_API_KEY  = process.env.RESEND_API_KEY;
 const FROM_EMAIL      = 'Saber.Delta@aamocolombia.com';
-const SENDER_EMAIL    = 'Pedro.Ochoa@aamocolombia.com'; // cuenta real que envía
 
 async function getToken() {
   const res  = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
@@ -92,14 +92,7 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
   console.log('Fila escrita en:', nextRow);
 }
 
-async function sendEmail(token, inscrito) {
-  // Obtener ID del usuario que envía (Pedro.Ochoa)
-  const uRes  = await fetch(`https://graph.microsoft.com/v1.0/users/${SENDER_EMAIL}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const uData = await uRes.json();
-  if (!uData.id) throw new Error('Remitente no encontrado: ' + JSON.stringify(uData));
-
+async function sendEmail(inscrito) {
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#081623;color:#c3ccd4;padding:40px;border-radius:12px;">
       <div style="text-align:center;margin-bottom:30px;">
@@ -130,26 +123,23 @@ async function sendEmail(token, inscrito) {
       </div>
     </div>`;
 
-  // Enviar desde Pedro.Ochoa pero mostrar From como Saber.Delta (buzón compartido)
-  const sendRes = await fetch(`https://graph.microsoft.com/v1.0/users/${uData.id}/sendMail`, {
+  const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
-      message: {
-        subject: '🔺 MISIÓN SABER DELTA — Inscripción Confirmada',
-        body: { contentType: 'HTML', content: html },
-        toRecipients: [{ emailAddress: { address: inscrito.correo, name: inscrito.nombre } }],
-        from: { emailAddress: { address: FROM_EMAIL, name: 'Misión Saber Delta · Milton Ochoa' } },
-      },
-      saveToSentItems: true,
+      from: `Misión Saber Delta <${FROM_EMAIL}>`,
+      to: [inscrito.correo],
+      subject: '🔺 MISIÓN SABER DELTA — Inscripción Confirmada',
+      html,
     }),
   });
 
-  if (!sendRes.ok && sendRes.status !== 202) {
-    const err = await sendRes.text();
-    throw new Error('Error correo: ' + err);
-  }
-  console.log('Correo enviado a:', inscrito.correo);
+  const data = await res.json();
+  if (!res.ok) throw new Error('Error correo Resend: ' + JSON.stringify(data));
+  console.log('Correo enviado a:', inscrito.correo, '| ID:', data.id);
 }
 
 export default async function handler(req, res) {
@@ -172,7 +162,7 @@ export default async function handler(req, res) {
     const fileId  = await findFileId(token, siteId, driveId);
 
     await appendRow(token, siteId, driveId, fileId, inscrito);
-    await sendEmail(token, inscrito);
+    await sendEmail(inscrito);
 
     return res.status(200).json({ ok: true, message: 'Inscripción guardada y correo enviado' });
 
