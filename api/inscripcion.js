@@ -6,6 +6,7 @@ const CLIENT_SECRET   = process.env.CLIENT_SECRET;
 const SHAREPOINT_HOST = 'miltonochoacol.sharepoint.com';
 const SITE_PATH       = '/sites/Programacin';
 const FROM_EMAIL      = 'Saber.Delta@aamocolombia.com';
+const SENDER_EMAIL    = 'Pedro.Ochoa@aamocolombia.com'; // cuenta real que envía
 
 async function getToken() {
   const res  = await fetch(`https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`, {
@@ -67,10 +68,7 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
   let nextRow = 1;
   if (uData.values) {
     for (let i = 0; i < uData.values.length; i++) {
-      if (!uData.values[i][0] || uData.values[i][0] === '') {
-        nextRow = i + 1;
-        break;
-      }
+      if (!uData.values[i][0] || uData.values[i][0] === '') { nextRow = i + 1; break; }
       nextRow = i + 2;
     }
   }
@@ -95,12 +93,12 @@ async function appendRow(token, siteId, driveId, fileId, inscrito) {
 }
 
 async function sendEmail(token, inscrito) {
-  // Obtener ID del buzón compartido
-  const uRes  = await fetch(`https://graph.microsoft.com/v1.0/users/${FROM_EMAIL}`, {
+  // Obtener ID del usuario que envía (Pedro.Ochoa)
+  const uRes  = await fetch(`https://graph.microsoft.com/v1.0/users/${SENDER_EMAIL}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const uData = await uRes.json();
-  if (!uData.id) throw new Error('Buzón no encontrado: ' + JSON.stringify(uData));
+  if (!uData.id) throw new Error('Remitente no encontrado: ' + JSON.stringify(uData));
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#081623;color:#c3ccd4;padding:40px;border-radius:12px;">
@@ -132,6 +130,7 @@ async function sendEmail(token, inscrito) {
       </div>
     </div>`;
 
+  // Enviar desde Pedro.Ochoa pero mostrar From como Saber.Delta (buzón compartido)
   const sendRes = await fetch(`https://graph.microsoft.com/v1.0/users/${uData.id}/sendMail`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -140,7 +139,7 @@ async function sendEmail(token, inscrito) {
         subject: '🔺 MISIÓN SABER DELTA — Inscripción Confirmada',
         body: { contentType: 'HTML', content: html },
         toRecipients: [{ emailAddress: { address: inscrito.correo, name: inscrito.nombre } }],
-        from: { emailAddress: { address: FROM_EMAIL, name: 'Misión Saber Delta' } },
+        from: { emailAddress: { address: FROM_EMAIL, name: 'Misión Saber Delta · Milton Ochoa' } },
       },
       saveToSentItems: true,
     }),
@@ -167,8 +166,8 @@ export default async function handler(req, res) {
 
     const inscrito = { nombre, ciudad, institucion, whatsapp, correo, fecha: fecha || new Date().toISOString() };
 
-    const token  = await getToken();
-    const siteId = await getSiteId(token);
+    const token   = await getToken();
+    const siteId  = await getSiteId(token);
     const driveId = await getDriveId(token, siteId);
     const fileId  = await findFileId(token, siteId, driveId);
 
